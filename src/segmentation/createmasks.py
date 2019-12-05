@@ -6,18 +6,6 @@ from skimage import filters
 from skimage import morphology
 
 
-def vismask(img):
-
-    a_img = pcv.rgb2gray_lab(img, channel='a')
-    thresh_a = pcv.threshold.binary(a_img, 124, 255, 'dark')
-    b_img = pcv.rgb2gray_lab(img, channel='b')
-    thresh_b = pcv.threshold.binary(b_img, 127, 255, 'light')
-
-    mask = pcv.logical_and(thresh_a, thresh_b)
-    mask = pcv.fill(mask, 800)
-    final_mask = pcv.dilate(mask, 2, 1)
-
-    return final_mask
 
 # %%
 
@@ -45,12 +33,13 @@ def psIImask(img, mode='thresh'):
     # pcv.plot_image(img)
     if mode is 'thresh':
 
+        mask = pcv.threshold.otsu(img, 255, 'light')
         # this entropy based technique seems to work well when algae is present
-        algaethresh = filters.threshold_yen(image=img)
-        threshy = pcv.threshold.binary(img, algaethresh, 255, 'light')
-        mask = pcv.dilate(threshy, 2, 1)
-        mask = pcv.fill(mask, 250)
-        mask = pcv.erode(mask, 2, 2)
+        # algaethresh = filters.threshold_yen(image=img)
+        # threshy = pcv.threshold.binary(img, algaethresh, 255, 'light')
+        # mask = pcv.dilate(threshy, 2, 1)
+        mask = pcv.fill(mask, 100)
+        # mask = pcv.erode(mask, 2, 2)
         final_mask = mask  # pcv.fill(mask, 270)
 
     elif isinstance(mode, pd.DataFrame):

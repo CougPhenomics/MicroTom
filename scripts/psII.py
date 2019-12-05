@@ -19,7 +19,7 @@ from src.util import masked_stats
 from src.viz import add_scalebar, custom_colormaps
 
 # %% io directories
-indir = os.path.join('data','raw_snapshots','psII')
+indir = os.path.join('data','psII')
 # snapshotdir = indir
 outdir = os.path.join('output','psII')
 debugdir = os.path.join('debug','psII')
@@ -67,7 +67,7 @@ df['parameter'] = pd.Categorical(df.parameter,
 pcv.params.debug = 'plot'  # 'print' #'plot', 'None'
 # Figures will show 9x9inches which fits my monitor well.
 plt.rcParams["figure.figsize"] = (9, 9)
-plt.rcParams["font.family"] = "Arial"  # All text is Arial
+# plt.rcParams["font.family"] = "Arial"  # All text is Arial
 # %% The main analysis function
 # I like to reload my mask function to make sure it's the latest if I've been optimizing it
 # importlib.reload(createmasks)
@@ -86,7 +86,9 @@ def image_avg(fundf):
 
     # Create a new output filename that combines existing filename with parameter
     outfn = os.path.splitext(os.path.basename(fn_max))[0]
-    outfn_split = outfn.split('-')
+    outfn_split = outfn.split('_')
+    # outfn_split[2] = datetime.strptime(fundf.jobdate.values[0],'%Y-%m-%d').strftime('%Y%m%d')
+    outfn_split[2] = fundf.jobdate.dt.strftime('%Y%m%d').values[0]
     basefn = "-".join(outfn_split[0:-1])
     outfn_split[-1] = param_name
     outfn = "-".join(outfn_split)
@@ -117,10 +119,10 @@ def image_avg(fundf):
         # find objects and setup roi
         c, h = pcv.find_objects(img, mask)
         roi_c, roi_h = pcv.roi.multi(img, 
-                                    coord=(200, 250), 
-                                    radius=100, 
-                                    spacing=(300, 0), 
-                                    ncols=2, 
+                                    coord=(250, 350), 
+                                    radius=200, 
+                                    spacing=(0, 0), 
+                                    ncols=1, 
                                     nrows=1)
 
         # setup individual roi plant masks
@@ -191,18 +193,16 @@ def image_avg(fundf):
         rh = roi_h[i]
 
         # Filter objects based on being in the defined ROI
-        try:
-
-            roi_obj, hierarchy_obj, submask, obj_area = pcv.roi_objects(
-                img, 
-                roi_contour=rc, 
-                roi_hierarchy=rh, 
-                object_contour=c, 
-                obj_hierarchy=h, 
-                roi_type='partial')
+        roi_obj, hierarchy_obj, submask, obj_area = pcv.roi_objects(
+        img, 
+        roi_contour=rc, 
+        roi_hierarchy=rh, 
+        object_contour=c, 
+        obj_hierarchy=h, 
+        roi_type='partial')
                 
-        except RuntimeError as err:
-            print('!!!', err, str(i))
+        if obj_area == 0:
+            print('!!! No plant detected in ROI ', str(i))
 
             frame_avg.append(np.nan)
             frame_avg.append(np.nan)
@@ -299,9 +299,12 @@ def image_avg(fundf):
     # also note, I originally designed this for trays of 2 pots. It will not detect if e.g. 2 out of 9 plants grow into each other
     rounded_avg = [round(n, 3) for n in yii_avg]
     rounded_std = [round(n, 3) for n in yii_std]
-    isunique = not (rounded_avg.count(rounded_avg[0]) == len(yii_avg) and
-                    rounded_std.count(rounded_std[0]) == len(yii_std))
-
+    if len(roi_c) > 1:
+        isunique = not (rounded_avg.count(rounded_avg[0]) == len(yii_avg) and
+                        rounded_std.count(rounded_std[0]) == len(yii_std))
+    else:
+        isunique = True
+        
     # save all values to outgoing dataframe
     outdf['roi'] = ithroi
     outdf['frame_avg'] = frame_avg
@@ -326,9 +329,9 @@ if pcv.params.debug == 'print':
 
 # %% Testing dataframe
 # If you need to test new function or threshold values you can subset your dataframe to analyze some images
-# df2 = df.query('(sampleid == "A4" & jobdate == "2019-05-14") | (sampleid == "B7" & jobdate == "2019-05-08")')
+# df2 = df.query('(sampleid == "A5" & jobdate == "2019-11-15")')# | (sampleid == "B7" & jobdate == "2019-11-20")')
 # del df2
-# fundf = df2.query('(sampleid == "A4"& parameter=="FvFm")')
+# fundf = df2.query('(sampleid == "A5" & parameter=="FvFm")')
 # del fundf
 # # # fundf
 # # end testing
@@ -357,10 +360,8 @@ df_avg2 = (pd.merge(df_avg,
            )
 
 # %% Write the tabular results to file!
+df_avg2.jobdate = df_avg2.jobdate.dt.strftime('%Y-%m-%d')
 (df_avg2.sort_values(['jobdate', 'sampleid', 'imageid'])
         .drop(['filename'], axis=1)
         .to_csv(os.path.join(outdir, 'output_psII_level0.csv'), na_rep='nan', float_format='%.4f', index=False)
 )
-
-
-#%%

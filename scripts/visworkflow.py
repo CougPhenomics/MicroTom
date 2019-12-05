@@ -234,7 +234,7 @@ def main():
         imgdir = os.path.join(args.outdir, 'pseudocolor_images', plantbarcode)
         os.makedirs(imgdir, exist_ok=True)
         gi_img = pcv.visualize.pseudocolor(
-            gi, obj=None, mask=final_mask, cmap='viridis', axes=False, min_value=0.3, max_value=0.6, background='black', obj_padding=0)
+            gi, obj=None, mask=final_mask, cmap='viridis', axes=False, min_value=0.3, max_value=0.5, background='black', obj_padding=0)
         gi_img = add_scalebar(
             gi_img, pixelresolution=pixelresolution, barwidth=20, barlocation='lower left')
         gi_img.set_size_inches(6, 6, forward=False)

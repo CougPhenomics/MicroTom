@@ -2,7 +2,7 @@
 import os
 import glob
 import re as re
-from datetime import datetime, timedelta
+from datetime import timedelta
 import pandas as pd
 
 def import_snapshots(snapshotdir, camera='vis'):
@@ -17,34 +17,30 @@ def import_snapshots(snapshotdir, camera='vis'):
     # %% Get metadata from .tifs
     # snapshotdir = 'data/raw_snapshots/psII'
 
-    fns = [fn for fn in glob.glob(pathname=os.path.join(snapshotdir,'*.tif'))]
+    fns = [fn for fn in glob.glob(pathname=os.path.join(snapshotdir,'*.png'))]
     fns
 
     flist = list()
     for fn in fns:
-        f=re.split('[-\\ ]', os.path.splitext(os.path.basename(fn))[0])
+        f=re.split('[_-]', os.path.splitext(os.path.basename(fn))[0])
         f.append(fn)
         flist.append(f)
 
-    fdf=pd.DataFrame(flist,columns=['sampleid','experiment','year','month','day','time','imageid','filename'])
-    fdf[['year','month','day']] = fdf[['year','month','day']].astype('int16')
+    fdf=pd.DataFrame(flist,columns=['sampleid','experiment','timestamp','cameralabel','imageid','filename'])
 
     # convert date and time columns to datetime format
-    fdf['date'] = pd.to_datetime(fdf.loc[:,['year','month','day']])
-    fdf['time'] = pd.to_timedelta(fdf.time.str.replace('_',':'))
-    fdf['datetime'] = fdf.date + fdf.time
-    fdf['jobdate'] = fdf['date']
+    fdf['datetime'] = pd.to_datetime(fdf['timestamp'])
+    fdf['jobdate'] = fdf.datetime.dt.floor('d')
 
     if camera.upper() == 'PSII':
         #create a jobdate to match dark and light measurements. dark experiments after 8PM correspond to the next day's light experiments
-        fdf.loc[fdf.datetime.dt.hour >= 20,'jobdate'] = fdf.loc[fdf.datetime.dt.hour >= 20,'date'] + timedelta(days=1)
+        fdf.loc[fdf.datetime.dt.hour >= 20,'jobdate'] = fdf.loc[fdf.datetime.dt.hour >= 20,'jobdate'] + timedelta(days=1)
 
         # convert image id from string to integer that can be sorted numerically
-        fdf['imageid'] = fdf.imageid.str.rsplit('_',-1).str[1].astype('uint8')
+        fdf['imageid'] = fdf.imageid.astype('uint8')
         fdf = fdf.sort_values(['sampleid','datetime','imageid'])
 
-
-    fdf = fdf.set_index(['sampleid','experiment','datetime','jobdate']).drop(columns=['year','month','day','date','time'])
+    fdf = fdf.set_index(['sampleid','experiment','datetime','jobdate']).drop(columns = ['timestamp'])
 
     # check for duplicate jobs of the same sample on the same day.  if jobs_removed.csv isnt blank then you shyould investigate!
     #dups = fdf.reset_index('datetime',drop=False).set_index(['imageid'],append=True).index.duplicated(keep='first')
