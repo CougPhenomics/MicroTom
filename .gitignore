@@ -20,3 +20,4 @@
 .R*
 *.log
 *.ipynb
+.Rproj.user

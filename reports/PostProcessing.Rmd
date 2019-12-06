@@ -1,0 +1,645 @@
+---
+title: "Post Processing Quality Control"
+author: "Dominik Schneider"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output:
+  bookdown::html_document2:
+    df_print: paged
+    fig_height: 6
+    fig_width: 8
+    output_dir: reports
+    toc: TRUE
+    toc_float: TRUE
+    toc_depth: 3
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+library(here)
+library(tidyverse)
+library(knitr)
+require(xtable)
+require(lubridate)
+walk(dir('src/R','.R$', full.names = T),source)
+
+knitr::opts_chunk$set(echo=F, results=F, fig.width = 10, warning=F, message=F)
+knitr::opts_knit$set(root.dir = rprojroot::find_root('.here'))
+
+```
+
+# Questions
+
+- how many image files from lemnatec database?
+- how many image files did we expect from the database?
+- does the results file match the expected number of results?
+
+# Data Analysis  {.tabset .tabset-fade}
+
+## VIS Results {.tabset .tabset-fade}
+
+```{r}
+n_sampleids = 42 #per experiment
+n_roi = 1 #per sampleid
+n_images = 1 #per day
+```
+
+### Analysis of Image Files 
+
+```{r fns, include=F}
+fns = dir(here::here('data','vis'))
+
+fns_split = str_split_fixed(fns,'[_-\ ]',Inf) %>% 
+  as_tibble(.name_repair='minimal') %>% 
+  setNames(c('sampleid','experiment','yr','mth','dy','time','imageid')) %>% 
+  mutate(date = as.Date(paste(yr, mth, dy,sep='-')),
+         datetime = as.POSIXct(paste(date,time),'%Y-%m-%d %H_%M_%S', tz='UTC')) %>% 
+  select(sampleid, date, datetime)
+
+```
+
+```{r alldates, include=FALSE}
+startdate = min(fns_split$date)
+enddate = max(fns_split$date)
+
+alldates = tibble(date = seq(startdate,enddate,by=1)) %>% 
+  left_join(fns_split)
+```
+
+```{r ndays_without, include=F}
+n_sampleimgs <- 
+  alldates %>% 
+  group_by(date) %>% 
+  summarise(n_without = sum(is.na(sampleid)),
+            n = sum(!is.na(sampleid)))
+
+n_dayswithout <- sum(n_sampleimgs$n_without)
+```
+
+Imaging started on `r startdate` and ended on `r enddate`. There were `r n_dayswithout` days without an image for any sample.
+
+```{r barplot_nwithout, eval=F}
+ggplot(n_sampleimgs %>% mutate(n_without = as.logical(n_without)))+
+  geom_col(aes(x=date,y=n_without), position='dodge')+
+  scale_x_date(date_breaks='1 day')+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle=45, hjust=1))+
+  labs(title = 'Days without an image for any sample')
+
+```
+
+```{r timespan, include=F}
+timediff = enddate-startdate+1
+n_days = timediff %>% as.numeric()
+
+n_expectedimgs <- n_sampleids * n_days * n_images
+n_takenimgs <- length(fns)
+p_takenimgs <- n_takenimgs/n_expectedimgs*100
+n_samplidimgs <-  n_days*n_images - n_dayswithout*n_images
+
+```
+
+The experiment was run for `r n_days` days with `r n_sampleids` samples, and `r n_images` image per day per sample, so we expected `r n_expectedimgs` images. We have `r length(fns)` images. This is `r sprintf('%.1f%%',p_takenimgs)`. Hence we are missing `r n_expectedimgs - n_takenimgs` or `r sprintf('%.1f%%',100-p_takenimgs)` of images.
+
+We expect `r n_sampleids*n_images` images per day:
+
+```{r n_sampleimgs}
+
+ggplot(n_sampleimgs)+
+  geom_col(aes(x=date, y=n), position='dodge')+
+  geom_text(aes(x=date, y=n, label=n), vjust=-.8, size=3)+
+  scale_x_date(date_breaks = '1 day')+
+  theme_bw()+
+  theme(axis.text.x=element_text(angle=45, hjust=1))+
+  labs(title = '# of images per day')
+
+```
+
+
+```{r n_dateimgs, include=F}
+n_dateimgs <- 
+  alldates %>% 
+  group_by(sampleid) %>% 
+  count()
+```
+
+
+
+### Analysis of Results
+
+Here we will read in the output file from our plantcv image analysis. Hopefully each image was analyzed and has a corresponding output.
+
+```{r echo=TRUE, message=FALSE}
+output = read_csv(here::here('output','vis','vis.csv-single-value-traits.csv'),
+                  na = 'NA') %>% 
+  mutate(jobdate = as.Date(timestamp))
+
+gmap = read_csv('data/genotype_map.csv')
+
+output <- full_join(output,gmap, by = c('plantbarcode' = 'sampleid', 'roi')) 
+
+```
+
+```{r gtypecolorpal}
+# sort gtypes so WT is at the start. Easier to assign "black"
+output$gtype = forcats::fct_relevel(output$gtype,'WT',after=0)
+gtypeLevels = levels(output$gtype)
+
+# setup gtype color palette
+n_gtypes = length(gtypeLevels)
+
+gtypecolorpal = c('black',RColorBrewer::brewer.pal(9,'Set1')[1:(n_gtypes-1)])
+names(gtypecolorpal) <- gtypeLevels #assign names to colors that match the gtype levels so filtered dataset still uses the same colors for each gtype
+
+```
+
+We expected `r n_sampleids * n_roi * n_images` data points per day.
+
+This graph shows the number of entries on each date in the output file. This includes NA values.
+
+```{r}
+output %>% 
+  count(jobdate) %>% 
+  ggplot()+
+  geom_col(aes(x=jobdate, y=n),position='dodge')+
+  geom_text(aes(x=jobdate, y=n, label=n), vjust=-1, size=3)+
+  scale_x_date(date_breaks = '1 day')+
+  theme_bw()+
+  theme(axis.text.x=element_text(angle=45, hjust=1))+
+  labs(title='# rows in greenness output file',
+       subtitle = '1 row per roi so n = 2x # of images per day')
+```
+
+
+```{r, include=F}
+output2 <- output  %>% 
+  select(jobdate, timestamp, in_bounds, roi, plantbarcode, plantarea, gtype)
+
+```
+
+We can check to see if we lost any output data compared to the input. For example, if a plant died then we'd see a step drop in the number of samples. The differences on each day between the graph above and the graph below indicates the number of lost plants.
+
+```{r}
+output2 %>%
+  group_by(jobdate, gtype) %>%
+  summarise(n_notna = sum(!is.na(plantarea))) %>%
+  ggplot() +
+  geom_col(aes(x = jobdate, y = n_notna), position = 'dodge') +
+  geom_text(
+    aes(x = jobdate, y = n_notna, label = n_notna),
+    vjust = -.75,
+    size = 2,
+    color = 'darkgreen'
+  ) +
+  facet_wrap( ~ gtype) +
+  scale_x_date(date_breaks = '2 day') +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = '# of greenness index datapoints on each day for each gtype')
+
+```
+
+
+#### Replication
+
+Do the datapoints from the different replicates look stable on each day?
+
+Before we look at replication, lets see how many samples were flagged for non-unique roi or out of frame plants.
+
+```{r}
+output2 <- 
+  output2 %>% 
+  group_by(timestamp, plantbarcode) %>% 
+  mutate(unique_roi = length(unique(plantarea))==n_roi | any(is.na(in_bounds), na.rm=F))
+  
+```
+
+```{r, paged.print=TRUE}
+output2 %>% 
+  ungroup %>% 
+  summarise(
+    n_oof = sum(!in_bounds, na.rm=T),
+    n_notunique = sum(!unique_roi)
+  ) 
+
+
+```
+
+```{r echo=FALSE, paged.print=TRUE}
+output2 %>% 
+  group_by(gtype) %>% 
+  summarise(
+    n_oof = sum(!in_bounds, na.rm=T),
+    n_notunique = sum(!unique_roi, na.rm=T)
+  ) 
+
+```
+
+```{r echo=FALSE}
+output2 <- 
+  output2 %>%  
+  filter(in_bounds==TRUE,unique_roi==TRUE) 
+
+output2 %>% 
+  group_by(gtype) %>% 
+  count()
+```
+
+
+```{r,  fig.height=12,warning=F}
+output2 %>% 
+  arrange(jobdate) %>% 
+  ggplot()+
+  geom_violin(aes(x=jobdate, y=plantarea, group=jobdate), adjust = .5, draw_quantiles = 0.5) +
+  geom_jitter(aes(x=jobdate, y=plantarea), alpha=0.25, fill='black', shape=21)+
+  facet_grid(gtype~jobdate, scales = 'free')+
+  scale_x_date(date_breaks = '1 day')+
+  theme_bw()+
+  theme(axis.text.x=element_text(angle=45, hjust=1),
+        strip.background.x = element_blank(),
+        strip.text.x = element_blank(),
+        panel.spacing.x = unit(0,'npc'),
+        panel.border = element_blank(),
+        axis.line = element_line())+
+  labs(title = 'Distribution and density of the extracted phenotype.',
+       subtitle = 'A tight cluster of points and a fat violin shows consistent replication. A long tail suggests an outlier. The horizontal bar is the median.')
+
+```
+
+
+```{r, eval=T}
+gistats <- 
+  output2 %>%
+  group_by(gtype,jobdate) %>% 
+  summarise(n = sum(!is.na(plantarea)),
+            n_notna = sum(is.na(plantarea)),
+            avg = mean(plantarea,na.rm=T),
+            sd = sd(plantarea, na.rm=T))
+
+
+ggplot(gistats)+
+  geom_col(aes(x=jobdate,y=avg, fill=gtype), position='dodge')+
+  geom_errorbar(aes(x=jobdate, ymin=avg-sd, ymax=avg+sd, group=gtype), position='dodge', color='grey50')+
+  geom_text(aes(x=jobdate, y=avg+sd+60, label = n, group=gtype),
+            #vjust = rep(c(0,.7,0,.7, 0), length.out=gistats %>% distinct(jobdate,gtype) %>% nrow()),
+  position=position_dodge(width=1), size=2)+
+  scale_fill_manual(values=gtypecolorpal)+
+  scale_x_date(date_breaks = '1 day')+
+  theme_bw()+
+  theme(axis.text.x=element_text(angle=45, hjust=1))+
+  labs(title = 'Average plant area (sq mm) per genotype',
+       subtitle = 'errorbars are +/- 1 sd\nnumber above the bar equals n samples')
+```
+
+We need to test if all the ROI are present and distinct. If the plants merged together, then the plant area will be the same for both roi of a sampleid. If 1 plant died then there should only be 1 roi for a sampleid.
+
+```{r echo=FALSE, message=FALSE, paged.print=TRUE, results='asis'}
+missingroi <- 
+  output2 %>% 
+  group_by_at(vars(plantbarcode, timestamp, jobdate)) %>% 
+  summarise(n_roi = n(),
+            n_uniqueroi = as_factor(length(unique(plantarea)))) %>% 
+  mutate(n_uniqueroi = fct_relevel(n_uniqueroi, sort)) %>% 
+  ungroup() %>% 
+  dplyr::select(-timestamp)
+```
+
+
+Table: Sample IDs with missing ROI (shown in black below)
+
+```{r echo=FALSE, message=FALSE, paged.print=TRUE, results='asis'}
+missingroi %>% 
+  filter(n_roi == n_uniqueroi, n_roi < !!n_roi) %>% 
+  distinct(plantbarcode,jobdate) %>% 
+  select(jobdate, plantbarcode) %>% 
+  arrange(jobdate)
+```
+
+Table: Sample IDs with nondistinct ROI (shown in red below)
+
+```{r echo=FALSE, message=FALSE, paged.print=TRUE, results='asis'}
+missingroi %>% 
+  filter(n_uniqueroi != n_roi) %>% 
+  distinct(plantbarcode,jobdate) %>% 
+  select(jobdate, plantbarcode) %>% 
+  arrange(jobdate)  
+```
+
+```{r message=FALSE}
+missingdF <- 
+output2 %>% 
+  full_join(missingroi)
+
+nonuniquedF <- missingdF %>% filter(n_roi != n_uniqueroi, plantarea != 0)
+singledF <-  missingdF %>%  filter(n_roi == n_uniqueroi, n_roi < !!n_roi)
+
+missingdF %>%
+  ggplot(aes(x = as.POSIXct(strptime(timestamp,'%Y-%m-%d %H_%M_%S')), y = plantarea)) +
+  geom_line(
+    aes(group = interaction(plantbarcode, roi)), color = 'grey80') +
+  geom_point(data = missingdF %>% arrange(n_uniqueroi),
+             aes(color = n_uniqueroi)) +
+  # geom_line(
+    # data = missingdF %>% filter(n_uniqueroi != n_roi),
+    # color = 'orange',aes(group = interaction(plantbarcode, roi))) +
+  geom_point(data = singledF, color='black')+
+  scale_color_manual(name = '# unique ROI', values = c('red', 'lightblue')) +
+  scale_x_datetime(date_breaks = '1 day') +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = 'Plant area (sq mm) within each ROI.',
+       subtitle = 'Black = only one roi for the sampleid = plant death\nRed = 2 nondistinct ROI = plants merged in image.\nGrey/blue = 2 distinct roi per sampleid = expected behavior.')
+
+
+```
+
+
+`r nrow(nonuniquedF)` data points with multiple nondistinct roi will be removed from the dataset and saved as `level1` product. Please use the level1 output for further analysis.
+
+```{r echo=F}
+nonuniquedF %>% 
+  anti_join(output,.) %>% 
+  write_csv(here::here('output','vis','vis.csv-single-value-traits_level1.csv'),
+            na = 'NA')
+
+
+```
+
+```{r}
+multidat = read_csv(here::here('output','vis','vis.csv-multi-value-traits.csv'))
+multidat %>% 
+  anti_join(nonuniquedF) %>% 
+  write_csv(here::here('output','vis','vis.csv-multi-value-traits_level1.csv'),
+            na='NA')
+
+
+```
+
+
+## PSII Results {.tabset .tabset-fade}
+
+```{r}
+n_sampleids = 42 #per experiment
+n_roi = 2 #per sampleid
+n_images = 28 #per day
+```
+
+
+### Analysis of Image Files
+
+```{r , include=F}
+fns = dir(file.path('data','raw_snapshots','psII'))
+
+fns_split = str_split_fixed(fns,'[-\ ]',Inf) %>%
+  as_tibble(.name_repair='minimal') %>%
+  setNames(c('sampleid','experiment','yr','mth','dy','time','imageid')) %>%
+  mutate(date = as.Date(paste(yr, mth, dy,sep='-')),
+         datetime = as.POSIXct(paste(date,time),'%Y-%m-%d %H_%M_%S', tz='UTC'),
+         imageid = as.integer(map_chr(.x=str_split(imageid,'_'), .f = pluck, 2))) %>%
+  select(sampleid, date, datetime, imageid)
+
+
+```
+
+```{r , include=FALSE}
+startdate = min(fns_split$date)
+enddate = max(fns_split$date)
+
+alldates = tibble(date = seq(startdate,enddate,by=1)) %>%
+  left_join(fns_split)
+```
+
+```{r , include=F}
+n_sampleimgs <-
+  alldates %>%
+  group_by(date) %>%
+  summarise(n_without = sum(is.na(sampleid)),
+            n = sum(!is.na(sampleid)))
+
+n_dayswithout <- sum(n_sampleimgs$n_without)
+```
+
+Imaging started on `r startdate` and ended on `r enddate`. There were `r n_dayswithout` days without an image for any sample.
+
+```{r , eval=F}
+ggplot(n_sampleimgs %>% mutate(n_without = as.logical(n_without)))+
+  geom_col(aes(x=date,y=n_without), position='dodge')+
+  scale_x_date(date_breaks='1 day')+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle=45, hjust=1))+
+  labs(title = 'Days without an image for any sample')
+
+```
+
+```{r , include=F}
+timediff = enddate-startdate+1
+n_days = timediff %>% as.numeric()
+
+n_expectedimgs <- n_sampleids * n_days * n_images
+n_takenimgs <- length(fns)
+p_takenimgs <- n_takenimgs/n_expectedimgs*100
+n_samplidimgs <-  n_days*n_images - n_dayswithout*n_images
+
+```
+
+The experiment was run for `r n_days` days with `r n_sampleids` samples, and `r n_images` image per day per sample, so we expected `r sprintf('%d',n_expectedimgs)` images. We have `r sprintf('%d',length(fns))` images. This is `r sprintf('%.1f%%',p_takenimgs)`. Hence we are missing `r n_expectedimgs - n_takenimgs` or `r sprintf('%.1f%%',100-p_takenimgs)` of images.
+
+We expect `r n_sampleids*n_images` images per day:
+
+```{r }
+
+ggplot(n_sampleimgs)+
+  geom_col(aes(x=date, y=n), position='dodge')+
+  geom_text(aes(x=date, y=n+.05*n, label = n))+
+  scale_x_date(date_breaks = '1 day')+
+  theme_bw()+
+  theme(axis.text.x=element_text(angle=45, hjust=1))+
+  labs(title = '# of images per day')
+
+```
+
+
+
+### Analysis of Results 
+
+Here we will read in the output file from our plantcv image analysis. Hopefully each image was analyzed and has a corresponding output.
+
+```{r echo=T}
+n_param = 12 #there are n photosynthetic parameters -->
+
+```
+
+
+```{r echo=TRUE, message=FALSE}
+output = read_csv('output/psII/output_psII_level0.csv',
+                  na = 'nan') %>%
+  mutate(jobdate = as.Date(jobdate))
+```
+
+
+```{r echo=TRUE, message=FALSE, include=F}
+output2 <-
+  output
+```
+
+```{r}
+# images 3,4,5,6 are not used typically.
+n_expectedrows = (n_images-4)*n_roi*(n_sampleids)
+```
+
+We expect `r n_expectedrows` datapoints per day.
+
+```{r }
+output2 %>%
+  ungroup %>% 
+  count(jobdate) %>%
+  ggplot()+
+  geom_col(aes(x=jobdate, y=n),position='dodge')+
+  geom_text(aes(x=jobdate, y=n, label=n),vjust=-1, size=3)+
+  scale_x_date(date_breaks = '1 day')+
+  theme_bw()+
+  theme(axis.text.x=element_text(angle=45, hjust=1))+
+  labs(title='# rows in psII output file',
+       subtitle = '1 row per roi so n = 2x # of images per day')
+```
+
+
+We can check to see if we lost any output data compared to the input. For example, if a plant died then we'd see the # of datapoints decrease over time.
+
+```{r, eval=T}
+n_gtyperesults <- n_sampleids/n_gtypes*n_roi*(n_param) #below we filter the dataframe down to 1 output perdistinct sampleid/gtype/parameter
+```
+
+We expect `r n_gtyperesults` datapoints per day per genotype.
+
+```{r, fig.width=12}
+output2 %>%
+  select(jobdate, gtype, parameter, yii_avg) %>%
+  distinct() %>%
+  group_by(jobdate,gtype) %>%
+  summarise(n_notna = sum(!is.na(yii_avg))) %>%
+  ggplot()+
+  geom_col(aes(x=jobdate,y=n_notna), position='dodge')+
+  geom_text(aes(x=jobdate, y=n_notna, label=n_notna),vjust=-.5, size=3, color='#660066')+
+  facet_wrap(~gtype)+
+  scale_x_date(date_breaks = '2 day')+
+  theme_bw(base_size = 12)+
+  theme(axis.text.x=element_text(angle=45, hjust=1))+
+  labs(title='# of psII parameter datapoints on each day for each gtype')
+
+```
+
+#### Replication
+
+Do the datapoints from the different replicates look stable on each day?
+
+```{r,  fig.height=24, fig.width=16, warning=F}
+output2 %>%
+  select(jobdate, gtype, parameter, yii_avg) %>%
+  distinct() %>%
+  ggplot()+
+  geom_violin(aes(x=jobdate, y=yii_avg, group=jobdate), draw_quantiles = 0.5, position='dodge')+
+  geom_jitter(aes(x=jobdate, y=yii_avg, group=jobdate), alpha=0.25, fill='black', shape=21)+
+  facet_grid(parameter~gtype, scales='free_y')+
+  scale_fill_manual(values=gtypecolorpal)+
+  scale_x_date(date_breaks = '1 day')+
+  # scale_y_continuous(limits = c(0,1))+
+  theme_bw()+
+  theme(axis.text.x=element_text(angle=45, hjust=1))+
+  labs(title = 'Distribution and density of the extracted phenotype.',
+       subtitle = 'A tight cluster of points and a fat violin shows consistent replication. A long tail suggests an outlier. The horizontal bar is the median.')
+
+```
+
+
+```{r, eval=T, fig.width=32, fig.height=24}
+gistats <-
+  output2 %>%
+  filter(frame == 'Fm' | frame == 'Fmp') %>%
+  group_by(gtype,jobdate, parameter) %>%
+  summarise(n = sum(!is.na(yii_avg)),
+            n_notna = sum(is.na(yii_avg)),
+            avg = mean(yii_avg,na.rm=T),
+            sd = sd(yii_avg, na.rm=T))
+
+
+ggplot(gistats)+
+  geom_col(aes(x=jobdate,y=avg), fill=NA, color='black')+
+  geom_errorbar(aes(x=jobdate, ymin=avg-sd, ymax=avg+sd), width=0.4)+
+  geom_text(aes(x=jobdate, y=avg+sd+.1, label = n, group=gtype), size=5)+
+  facet_grid(parameter~gtype, scales='free_y')+
+  scale_x_date(date_breaks = '1 day')+
+  theme_bw()+
+  theme(axis.text.x=element_text(angle=45, hjust=1))+
+  labs(title = 'Average Y(II) per genotype.',
+       subtitle = 'errorbars are +/- 1 sd\nnumber above the bar equals n samples')
+```
+
+We need to test if all the ROI are present and distinct. If the plants merged together, then the plant area will be the same for both roi of a sampleid. If 1 plant died then there should only be 1 roi for a sampleid.
+
+```{r echo=FALSE, message=FALSE, paged.print=TRUE}
+
+missingroi <-
+  output2 %>%
+  filter(frame == 'Fm' | frame == 'Fmp') %>%
+  group_by_at(vars(sampleid, jobdate, parameter)) %>%
+  summarise(n_roi = n(),
+            n_uniqueroi = length(unique(yii_avg)))
+
+missingroi %>% filter(n_roi < !!n_roi) %>% distinct(sampleid,jobdate) %>% select(jobdate,sampleid) %>% arrange(jobdate) %>% 
+  rmarkdown::paged_table(options = list(rows.print = 20))
+
+missingroi %>% filter(n_uniqueroi != n_roi) %>% distinct(sampleid,jobdate) %>% select(jobdate,sampleid) %>% arrange(jobdate) %>%
+  rmarkdown::paged_table(options = list(rows.print = 20))
+#%>% knitr::kable(caption = 'Sample IDs with nondistinct ROI (shown in red below')
+
+```
+
+```{r message=FALSE}
+
+missingdF <-
+output2 %>%
+  full_join(missingroi)
+
+# lastdF <-
+#   missingdF %>%
+#   group_by(sampleid,roi) %>%
+#   top_n(1, jobdate)
+
+
+missingdF %>%
+  filter(frame == 'Fm') %>%
+  arrange(desc(n_uniqueroi)) %>%
+  ggplot()+
+  geom_path(aes(x=jobdate, y = yii_avg, group=interaction(sampleid, roi)),color='grey80')+
+  # geom_line(data = missingdF %>% filter(n_uniqueroi<2,n_roi>1),aes(x=jobdate, y=yii_avg, group=interaction(sampleid, roi)), color='orange')+
+  geom_point(aes(x=jobdate, y = yii_avg, color=as.character(n_uniqueroi)))+
+  geom_point(data=missingdF %>% filter(n_uniqueroi == n_roi, n_roi < !!n_roi),aes(x=jobdate, y = yii_avg), color='black')+
+  scale_color_manual(name = '# unique ROI', values=c('red','lightblue'), )+
+  scale_x_date(date_breaks='1 day')+
+  # scale_y_continuous(trans = 'reciprocal')+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle=45,hjust=1))+
+  labs(title = 'Fv/Fm within each ROI.',
+       subtitle = 'Black = only one roi for the sampleid = plant death.\nRed = 2 nondistinct ROI = plants merged in image.\nGrey/blue = 2 distinct roi per sampleid = expected behavior.')
+
+```
+
+
+The data points with nondistinct roi will be removed from the dataset and saved as a `level1` output. Please use the level 1 output for further analysis.
+
+```{r echo=F}
+full_join(output, missingroi) %>%
+  mutate(yii_avg = ifelse(n_uniqueroi != n_roi, NA, yii_avg),
+         yii_std = ifelse(n_uniqueroi != n_roi, NA, yii_std),
+         npq_avg = ifelse(n_uniqueroi != n_roi, NA, npq_avg),
+         npq_std = ifelse(n_uniqueroi != n_roi, NA, npq_std),
+         frame_avg = ifelse(n_uniqueroi != n_roi, NA, frame_avg)
+) %>%
+  write_csv('output/psII/output_psII_level1.csv',
+            na = 'NA')
+
+
+```
+
+
