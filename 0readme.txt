@@ -6,12 +6,29 @@ python /home/dominik/Documents/data-science-tools/LT-db-extractor.py -c ../cppcs
 python /home/dominik/Documents/data-science-tools/LT-db-extractor.py -c ../cppcserver-local.config -o data/psII -e MicroTom -l PSII
 
 
-- capturesettings
-    :dated files contain environmental conditions in the chamber throughout the experiment
-    :psII_night_IndC.prg is the PSII script that was run each night.
-    :CameraSettings contains an xml file for each camera with the settings used for image capture
 
 - data
+    - MicroTom_experimentdata
+        -CameraSettings
+            :contains an xml file for each camera with the settings used for image capture
+        -EnvironmentLogger
+            :dated files contain environmental conditions in the chamber throughout the experiment
+        -IndividualPlantHeight
+            :not used
+        -IndividualWateringAmount
+            :not used
+        -Jobs
+            :*.xml files detailing the settings for each job
+        -Log
+            :operations logs
+        -Snapshots
+            :empty
+        -SnapshotsInDatabase
+            :empty
+        -SnapshotsWithDatabaseTransferErrors
+            :empty
+        :LemnaTec2.prg is the PSII script that was run each night.
+        :settings.xml is the configuration for the entire experiment. 
     :genotype_map.csv is the layout of the genotypes, the plantbarcode, and the roi
     :pimframes_map.csv provides metadata about each frame of the .pim file that comes from the PSII camera
     -psII
