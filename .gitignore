@@ -21,3 +21,4 @@
 *.log
 *.ipynb
 .Rproj.user
+*.xlsx
