@@ -11,7 +11,7 @@ args = commandArgs(trailingOnly = T)
 
 # test if there are two arguments: if not, return an error
 if (length(args)<2) {
-  stop('Two arguments must be supplied:\n1. output directory for a dataset\n2. path to genotype_map.csv\nFor Example: Rscript --vanilla makeVideos.R "output/from_diy_data" "diy_data/genotype_map.csv"', call.=T)
+  stop('Two arguments must be supplied:\n1. output directory for a dataset\n2. path to genotype_map.csv\nFor Example: Rscript --vanilla makeVideos.R "output/psII" "diy_data/genotype_map.csv"', call.=T)
 }
 
 # function to try to load required makes. if not loadable, install.
@@ -39,11 +39,14 @@ gmap = read_csv(file.path(root,args[2]))
 
 # get data processed
 output = read_csv(file.path(root, datadir,'output_psII_level0.csv'),
-                  col_types = cols(treatment = col_character(), gtype = col_character())) %>% 
-  dplyr::select(treatment, sampleid, roi, gtype)
+                  col_types = cols(gtype = col_character())) %>%
+  dplyr::select(gtype, sampleid, roi)
 
 # filter gmap for available output files
-gmap = inner_join(gmap, output) %>% distinct(treatment, sampleid, roi, gtype)
+gmap = inner_join(gmap, output) %>% distinct(sampleid, roi, gtype) %>% 
+  mutate(treatment = case_when(gtype=='WT'~'control',
+                               TRUE ~ gtype),
+         gtype = 'WT')
 
 # setup roi positions for genotype labels
 nrow = 3
@@ -68,7 +71,7 @@ get_treatment <- function(traynum) {
 # get dates from filename
 get_dates = function(fns) {
   splitlist = stringr::str_split(basename(fns), '[-\\ ]')
-  map_chr(splitlist, .f = ~ lubridate::ymd(.x[2]) %>% as.character)
+  map_chr(splitlist, .f = ~ lubridate::ymd(.x[3]) %>% as.character)
 }
 
 # create list of tray pairs for gifs
@@ -77,8 +80,8 @@ cntrl_ids = unique(gmap %>% filter(treatment == 'control') %>% pull(sampleid))
 l =  cross2(fluc_ids, cntrl_ids)
 
 # test values
-# sampleid_c = 'tray2'
-# sampleid_t = 'tray5'
+# sampleid_c = 'A1'
+# sampleid_t = 'A2'
 # parameter_string = 'FvFm_YII'#'FvFm_YII' #'t300_ALon_YII'
 # il = l[[1]]
 
@@ -143,7 +146,7 @@ arrange_gif = function(il, parameter_string) {
     font = 'Arial',
     weight = 700,
     gravity = "NorthWest",
-    location = geometry_point(535, 20),
+    location = geometry_point(300, 20),
     color = 'white'
   )
   
@@ -197,7 +200,7 @@ arrange_gif = function(il, parameter_string) {
     font = 'Arial',
     weight = 700,
     gravity = "NorthWest",
-    location = geometry_point(535, 20),
+    location = geometry_point(300, 20),
     color = 'white'
   )
   
@@ -250,7 +253,7 @@ arrange_gif = function(il, parameter_string) {
   # image_write_gif(newgif,file.path(outdir, outfn), delay=0.5)
 }
 
-
+param = 'FvFm_YII'
 for (param in c('FvFm_YII', 't300_ALon_YII', 't300_ALon_NPQ')) {
   walk(l, arrange_gif, param)
 }
